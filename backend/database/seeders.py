@@ -31,11 +31,13 @@ class DatabaseSeeder:
                 initial_password = UserSeeder.run(db)
                 ConfigSeeder.run(db)
                 ServerSeeder.run(db)
-                
+
                 # Providers
                 provider_count = ProviderSeeder.run(db)
 
-                logger.info(f"Database setup complete (providers: {', '.join(provider_count)})")
+                logger.info(
+                    f"Database setup complete (providers: {', '.join(provider_count)})"
+                )
 
                 return initial_password
             except Exception as e:
@@ -80,7 +82,7 @@ class UserSeeder:
 
         db.add(admin_user)
         db.commit()
-        
+
         return initial_password
 
 
@@ -189,7 +191,7 @@ class ProviderSeeder:
             if not existing:
                 provider = Provider(**provider_data)
                 db.add(provider)
-                created.append(provider_data['key'])
+                created.append(provider_data["key"])
 
         db.commit()
         return created

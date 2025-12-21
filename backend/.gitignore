@@ -16,8 +16,10 @@ ENV/
 
 # Analytics
 database/analytics.json
+database/logs.json
 database/*.mmdb
 database/GeoLite2-*.mmdb
+database/stats
 
 # IDE
 .vscode/

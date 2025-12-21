@@ -161,6 +161,33 @@ const reconcileServices = async () => {
 };
 
 const route = useRoute();
+const router = useRouter();
+
+// Watch for query parameter to open modal
+watch(
+  () => route.query,
+  (query) => {
+    if (query.new === 'true') {
+      // Check if server parameter is provided
+      if (query.server) {
+        preselectedServerId.value = query.server;
+      } else {
+        preselectedServerId.value = "";
+      }
+      
+      showCreateModal.value = true;
+    }
+  },
+  { immediate: true, deep: true }
+);
+
+// Clean URL when modal closes
+watch(showCreateModal, (isOpen) => {
+  if (!isOpen && route.query.new === 'true') {
+    // Remove the query parameters from URL without reloading
+    router.replace({ query: {} });
+  }
+});
 
 onMounted(() => {
   fetchServices();

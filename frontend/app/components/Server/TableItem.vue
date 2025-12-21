@@ -121,7 +121,7 @@ const openTerminal = () => {
       </div>
     </td>
 
-    <!-- Hardware Stats Column: CPU, RAM, HDD, IOPS -->
+    <!-- Hardware Stats Column: CPU, RAM -->
     <td class="px-6 py-4">
       <!-- Loading State: Connected but no stats yet -->
       <div
@@ -168,35 +168,6 @@ const openTerminal = () => {
             <div
               class="h-full bg-purple-500 rounded-full transition-all duration-500"
               :style="{ width: `${stats.memory_percent}%` }"
-            ></div>
-          </div>
-        </div>
-
-        <!-- IOPS -->
-        <div
-          class="flex flex-col gap-1"
-          v-if="stats.disk_read_ops !== undefined"
-        >
-          <div
-            class="flex justify-between text-[10px] text-gray-500 dark:text-gray-400"
-          >
-            <span>I/O</span>
-            <span>{{
-              (stats.disk_read_ops || 0) + (stats.disk_write_ops || 0)
-            }}</span>
-          </div>
-          <div
-            class="h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden"
-          >
-            <div
-              class="h-full bg-green-500 rounded-full transition-all duration-500"
-              :style="{
-                width: `${Math.min(
-                  ((stats.disk_read_ops || 0) + (stats.disk_write_ops || 0)) /
-                    10,
-                  100
-                )}%`,
-              }"
             ></div>
           </div>
         </div>

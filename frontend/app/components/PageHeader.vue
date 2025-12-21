@@ -41,7 +41,7 @@ const iconIsString = () => {
 </script>
 <template>
   <!-- Page Header -->
-  <div class="flex justify-between items-center gap-x-6">
+  <div class="flex justify-between items-center gap-x-6 h-10 py-4">
     <div class="flex gap-x-2 items-center">
       <NuxtLink
         v-if="backPath"

@@ -1,0 +1,48 @@
+FROM python:3.13-slim
+
+WORKDIR /app
+
+# Install system dependencies for Python packages and binaries
+RUN apt-get update && apt-get install -y \
+    wget \
+    tar \
+    gcc \
+    g++ \
+    libffi-dev \
+    libssl-dev \
+    cargo \
+    ca-certificates \
+    curl \
+    gnupg \
+    lsb-release \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Docker
+RUN curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian bullseye stable" > /etc/apt/sources.list.d/docker.list \
+    && apt-get update \
+    && apt-get install -y docker-ce-cli \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install cloudflared
+RUN wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
+    && mv cloudflared-linux-amd64 /usr/bin/cloudflared \
+    && chmod +x /usr/bin/cloudflared
+
+# Install ngrok
+RUN wget -q https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz \
+    && tar -xzf ngrok-v3-stable-linux-amd64.tgz \
+    && mv ngrok /usr/bin/ngrok \
+    && chmod +x /usr/bin/ngrok \
+    && rm ngrok-v3-stable-linux-amd64.tgz
+
+RUN pip install pipenv debugpy
+
+# Copy dependency files first
+COPY Pipfile Pipfile.lock ./
+RUN pipenv install --dev --system
+
+# Copy the rest of the application
+COPY . .
+
+CMD ["python", "main.py"]

@@ -1,0 +1,28 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: localrun-backend
+    platform: linux/amd64
+    labels:
+      - "localrun-app=backend"
+    ports:
+      - "8000:8000"
+      - "5678:5678"
+    env_file:
+      - .env
+    volumes:
+      - ./backend:/app
+      - ~/.localrun:/app/storage
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /proc:/host/proc:ro
+      - /etc/os-release:/host/etc/os-release:ro
+    restart: unless-stopped
+    privileged: true
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+

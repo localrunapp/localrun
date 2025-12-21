@@ -1,0 +1,27 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+docker = "*"
+fastapi = "*"
+uvicorn = "*"
+python-dotenv = "*"
+pydantic = "*"
+pydantic-settings = "*"
+requests = "*"
+psutil = "*"
+websockets = "*"
+jinja2 = "*"
+aiofiles = "*"
+python-multipart = "*"
+sqlalchemy = "*"
+alembic = "*"
+asyncpg = "*"
+
+[dev-packages]
+pyinstaller = "*"
+
+[requires]
+python_version = "3.13"

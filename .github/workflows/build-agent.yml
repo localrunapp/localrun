@@ -1,0 +1,63 @@
+name: Build LocalRun Agent
+
+on:
+  release:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+jobs:
+  build-macos:
+    name: Build for macOS
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        arch: [arm64, x86_64]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        working-directory: agent/macos
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install pyinstaller
+      
+      - name: Build binary
+        working-directory: agent/macos
+        run: |
+          python build.py
+      
+      - name: Create tarball
+        working-directory: agent/macos
+        run: |
+          ARCH="${{ matrix.arch }}"
+          tar -czf "dist/localrun-agent-macos-${ARCH}.tar.gz" -C dist localrun-agent
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: localrun-agent-macos-${{ matrix.arch }}
+          path: agent/macos/dist/localrun-agent-macos-${{ matrix.arch }}.tar.gz
+      
+      - name: Upload to release
+        if: github.event_name == 'release'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: agent/macos/dist/localrun-agent-macos-${{ matrix.arch }}.tar.gz
+          asset_name: localrun-agent-macos-${{ matrix.arch }}.tar.gz
+          asset_content_type: application/gzip

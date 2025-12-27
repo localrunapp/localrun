@@ -4,12 +4,9 @@ Application Bootstrap
 Orchestrates all startup tasks using use cases.
 """
 
-import json
+
 import logging
 import os
-import uuid
-from datetime import datetime
-from pathlib import Path
 from typing import Dict, Any
 
 from sqlmodel import Session
@@ -33,40 +30,6 @@ def is_hot_reload() -> bool:
     return os.environ.get("HOT_RELOAD", "false").lower() == "true"
 
 
-def generate_or_load_reset_token() -> str:
-    """
-    Generate or load existing password reset token.
-    Token persists across restarts in /app/storage/reset_token.json
-    """
-    token_file = Path("/app/storage/reset_token.json")
-    token_file.parent.mkdir(parents=True, exist_ok=True)
-
-    # Load existing token
-    if token_file.exists():
-        try:
-            with open(token_file, "r") as f:
-                data = json.load(f)
-                return data["token"]
-        except Exception as e:
-            logger.warning(f"Could not load reset token, generating new: {e}")
-
-    # Generate new token
-    token = str(uuid.uuid4())
-    data = {
-        "token": token,
-        "created_at": datetime.now().isoformat(),
-        "last_used": None
-    }
-
-    try:
-        with open(token_file, "w") as f:
-            json.dump(data, f, indent=2)
-    except Exception as e:
-        logger.error(f"Could not save reset token: {e}")
-
-    return token
-
-
 def get_or_create_system_user(db: Session):
     """Get or create system user for internal operations"""
     from core.auth import create_system_user
@@ -80,10 +43,9 @@ async def bootstrap_application() -> Dict[str, Any]:
     Orchestrates all initialization tasks using use cases:
     1. Database seeding (first run only)
     2. System user creation
-    3. Reset token generation
-    4. Tunnel state synchronization (use case)
-    5. Host IP auto-detection (use case)
-    6. Background services startup (use case)
+    3. Tunnel state synchronization (use case)
+    4. Host IP auto-detection (use case)
+    5. Background services startup (use case)
     
     Returns:
         dict: Bootstrap results
@@ -102,22 +64,19 @@ async def bootstrap_application() -> Dict[str, Any]:
         logger.error(f"Database initialization failed: {e}")
         raise
     
-    # 2. Generate/load reset token
-    results["reset_token"] = generate_or_load_reset_token()
-    
-    # 3. Get/create system user
+    # 2. Get/create system user
     results["system_user"] = get_or_create_system_user(db)
     
-    # 4. Sync tunnel states (use case - skip in hot reload)
+    # 3. Sync tunnel states (use case - skip in hot reload)
     if not is_hot_reload():
         results["sync_result"] = await sync_tunnel_states_use_case(
             db, results["system_user"]
         )
     
-    # 5. Auto-detect host IP (use case)
+    # 4. Auto-detect host IP (use case)
     results["host_ip"] = await auto_detect_host_ip_use_case(db)
     
-    # 6. Start background services (use case)
+    # 5. Start background services (use case)
     start_health_checker_use_case()
     
     return results

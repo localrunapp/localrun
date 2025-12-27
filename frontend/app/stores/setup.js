@@ -76,24 +76,6 @@ export const useSetupStore = defineStore('setupStore', {
             }
         },
 
-        async verifyInitialPassword(password) {
-            try {
-                const config = useRuntimeConfig();
-                const response = await fetch('/api/setup/verify-password', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ password }),
-                });
-                const data = await response.json();
-                return data;
-            } catch (error) {
-                console.error('Error verifying password:', error);
-                return { valid: false, message: 'Error verifying password' };
-            }
-        },
-
         async completeSetup(setupData) {
             try {
                 this.loading = true;

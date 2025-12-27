@@ -5,6 +5,7 @@ Handles first-time setup wizard flow.
 
 import platform
 import socket
+from datetime import datetime
 from typing import Dict, Any
 
 from fastapi import HTTPException, status
@@ -29,23 +30,11 @@ class SetupStatusResponse(BaseModel):
     requires_setup: bool
 
 
-class VerifyPasswordRequest(BaseModel):
-    """Verify initial password request."""
-
-    password: str = Field(..., min_length=1)
-
-
-class VerifyPasswordResponse(BaseModel):
-    """Verify password response."""
-
-    valid: bool
-    message: str
 
 
 class CompleteSetupRequest(BaseModel):
     """Complete setup request."""
 
-    initial_password: str = Field(..., min_length=1)
     installation_name: str = Field(..., min_length=1, max_length=255)
     new_password: str = Field(..., min_length=8)
     new_password_confirmation: str = Field(..., min_length=8)
@@ -57,6 +46,7 @@ class CompleteSetupResponse(BaseModel):
     success: bool
     message: str
     installation_name: str
+    reset_token: str
 
 
 class AgentStatusResponse(BaseModel):
@@ -188,13 +178,20 @@ class SetupController:
         finally:
             db.close()
 
-    def verify_initial_password(
-        self, request: VerifyPasswordRequest
-    ) -> VerifyPasswordResponse:
+
+    def complete_setup(self, request: CompleteSetupRequest) -> CompleteSetupResponse:
         """
-        Verify the initial random password shown in logs.
-        This is used during setup to authenticate the user.
+        Complete initial setup:
+        1. Validate new password matches confirmation
+        2. Update admin password
+        3. Generate reset token
+        4. Save installation name
+        5. Mark setup as completed
         """
+        import json
+        from pathlib import Path
+        import uuid
+        
         db = next(get_db())
 
         try:
@@ -202,45 +199,9 @@ class SetupController:
             admin = db.exec(select(User).where(User.username == "admin")).first()
 
             if not admin:
-                return VerifyPasswordResponse(
-                    valid=False, message="Admin user not found"
-                )
-
-            # Verify password
-            if Hash.check(request.password, admin.password):
-                return VerifyPasswordResponse(
-                    valid=True, message="Password verified successfully"
-                )
-            else:
-                return VerifyPasswordResponse(valid=False, message="Invalid password")
-        finally:
-            db.close()
-
-    def complete_setup(self, request: CompleteSetupRequest) -> CompleteSetupResponse:
-        """
-        Complete initial setup:
-        1. Verify initial password
-        2. Validate new password matches confirmation
-        3. Update admin password
-        4. Save installation name
-        5. Mark setup as completed
-        """
-        db = next(get_db())
-
-        try:
-            # Verify initial password
-            admin = db.exec(select(User).where(User.username == "admin")).first()
-
-            if not admin:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Admin user not found",
-                )
-
-            if not Hash.check(request.initial_password, admin.password):
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Invalid initial password",
                 )
 
             # Validate new password confirmation
@@ -254,6 +215,27 @@ class SetupController:
             admin.password = Hash.make(request.new_password)
             db.add(admin)
 
+            # Generate reset token
+            reset_token = str(uuid.uuid4())
+            token_file = Path("/app/storage/reset_token.json")
+            token_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            token_data = {
+                "token": reset_token,
+                "created_at": datetime.now().isoformat(),
+                "last_used": None
+            }
+            
+            try:
+                with open(token_file, "w") as f:
+                    json.dump(token_data, f, indent=2)
+            except Exception as e:
+                logger.error(f"Could not save reset token: {e}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Could not save reset token",
+                )
+
             # Update or create config
             config = db.exec(select(Config)).first()
 
@@ -261,12 +243,12 @@ class SetupController:
                 config = Config(
                     setup_completed=True,
                     installation_name=request.installation_name,
-                    initial_password_used=True,
+                    initial_password_used=False,
                 )
             else:
                 config.setup_completed = True
                 config.installation_name = request.installation_name
-                config.initial_password_used = True
+                config.initial_password_used = False
 
             db.add(config)
             db.commit()
@@ -293,6 +275,7 @@ class SetupController:
                 success=True,
                 message="Setup completed successfully",
                 installation_name=config.installation_name,
+                reset_token=reset_token,
             )
         except HTTPException:
             db.rollback()

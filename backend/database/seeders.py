@@ -1,5 +1,3 @@
-import secrets
-import string
 import uuid
 
 from sqlmodel import Session, select
@@ -52,14 +50,8 @@ class UserSeeder:
     """
 
     @staticmethod
-    def _generate_random_password(length: int = 16) -> str:
-        """Generate a secure random password."""
-        alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
-        return "".join(secrets.choice(alphabet) for _ in range(length))
-
-    @staticmethod
     def run(db: Session) -> str:
-        """Seed users table and return initial password"""
+        """Seed users table - creates admin with placeholder password"""
         # Check if admin user already exists
         statement = select(User).where(User.username == "admin")
         existing_user = db.exec(statement).first()
@@ -67,14 +59,11 @@ class UserSeeder:
         if existing_user:
             return None
 
-        # Generate random password
-        initial_password = UserSeeder._generate_random_password()
-
-        # Create admin user
+        # Create admin user with placeholder password (will be set during setup)
         admin_user = User(
             username="admin",
             email="admin@localrun.local",
-            password=Hash.make(initial_password),
+            password=Hash.make("placeholder_password"),  # Will be replaced during setup
             full_name="System Administrator",
             is_active=True,
             is_admin=True,
@@ -83,7 +72,7 @@ class UserSeeder:
         db.add(admin_user)
         db.commit()
 
-        return initial_password
+        return None  # No initial password to return
 
 
 class ConfigSeeder:

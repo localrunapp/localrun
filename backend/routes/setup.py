@@ -17,11 +17,6 @@ router.add_api_route(
 # Setup status
 router.add_api_route("/status", setup_controller.get_setup_status, methods=["GET"])
 
-# Verify password
-router.add_api_route(
-    "/verify-password", setup_controller.verify_initial_password, methods=["POST"]
-)
-
 # Complete setup
 router.add_api_route("/complete", setup_controller.complete_setup, methods=["POST"])
 

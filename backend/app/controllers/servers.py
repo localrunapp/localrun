@@ -64,6 +64,10 @@ class ServersController:
         self.stats_storage = server_stats_repository
         self.stats_manager = stats_manager
         self.terminal_manager = terminal_manager
+        
+        # Throttling: Track last DB save per server (server_id -> timestamp)
+        self.last_db_save: Dict[str, datetime] = {}
+        self.db_save_interval_seconds = 60  # Save to DB once per minute
 
     # ===== CRUD Operations =====
 
@@ -378,14 +382,37 @@ class ServersController:
         return StatsEntry(**latest)
 
     async def add_server_stats(self, server_id: str, stats: Dict[str, Any]):
-        """Add stats for a server (called by agent)."""
+        """
+        Add stats for a server (called by agent).
+        
+        - Always broadcasts to WebSocket subscribers in real-time
+        - Only saves to DB once per minute to prevent saturation
+        """
         # Verify server exists
         await self.get_server(server_id)
+        
+        # Check if we should save to DB (throttling)
+        now = datetime.utcnow()
+        should_save_to_db = False
+        
+        if server_id not in self.last_db_save:
+            # First time for this server - save
+            should_save_to_db = True
+        else:
+            # Check if enough time has passed
+            time_since_last_save = (now - self.last_db_save[server_id]).total_seconds()
+            if time_since_last_save >= self.db_save_interval_seconds:
+                should_save_to_db = True
+        
+        # Save to DB only if throttle allows
+        if should_save_to_db:
+            self.stats_storage.add_stats(server_id, stats)
+            self.last_db_save[server_id] = now
+            logger.debug(f"Stats saved to DB for server {server_id}")
+        else:
+            logger.debug(f"Stats skipped DB save for server {server_id} (throttled)")
 
-        # Store in TinyDB
-        self.stats_storage.add_stats(server_id, stats)
-
-        # Broadcast to WebSocket subscribers
+        # ALWAYS broadcast to WebSocket subscribers (real-time)
         await self.stats_manager.broadcast(
             server_id, {"type": "stats_update", "server_id": server_id, "data": stats}
         )

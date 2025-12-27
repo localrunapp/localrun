@@ -50,16 +50,6 @@ def show_banner():
     logger.info("")
 
 
-def show_credentials(initial_password: str, reset_token: str):
-    """Display initial credentials"""
-    logger.info("")
-    logger.info("=" * 80)
-    logger.info("CREDENTIALS")
-    logger.info("=" * 80)
-    logger.info(f"Initial Setup Password: {initial_password}")
-    logger.info(f"Password Reset Token: {reset_token}")
-    logger.info("")
-    logger.info("=" * 80)
 
 
 async def startup_tasks():
@@ -68,10 +58,6 @@ async def startup_tasks():
     
     # Bootstrap application
     results = await bootstrap_application()
-    
-    # Show credentials on first run
-    if results.get("is_first_run"):
-        show_credentials(results["initial_password"], results["reset_token"])
 
 
 async def shutdown_tasks():

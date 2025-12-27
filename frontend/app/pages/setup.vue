@@ -6,18 +6,18 @@ definePageMeta({
 const setupStore = useSetupStore();
 const isDark = useState("isDark", () => false);
 
-const initialPassword = ref("");
-const passwordVerified = ref(false);
 const loading = ref(false);
 const error = ref("");
+const setupCompleted = ref(false);
+const resetToken = ref("");
 const copied = ref(false);
-const logsCopied = ref(false);
-const agentInstallCommand = ref("");
+const downloadedToken = ref(false);
 const systemInfo = ref(null);
 const agentConnected = ref(false);
 const hostInfo = ref(null);
-const apiConnected = ref(true); // Assume connected initially
+const apiConnected = ref(true);
 const checkingConnection = ref(false);
+const agentInstallCommand = ref("");
 let pollingInterval = null;
 
 const formData = ref({
@@ -43,9 +43,7 @@ const isPasswordValid = computed(() => {
 });
 
 const canSubmit = computed(() => {
-  return (
-    passwordVerified.value && isPasswordValid.value && formData.value.serverName
-  );
+  return isPasswordValid.value && formData.value.serverName;
 });
 
 const formatBytes = (bytes) => {
@@ -66,9 +64,8 @@ const checkApiConnection = async () => {
   error.value = "";
 
   try {
-    const config = useRuntimeConfig();
     const response = await fetch("/api/health", {
-      signal: AbortSignal.timeout(5000), // 5 second timeout
+      signal: AbortSignal.timeout(5000),
       headers: {
         Accept: "application/json",
       },
@@ -76,7 +73,6 @@ const checkApiConnection = async () => {
 
     if (response.ok) {
       apiConnected.value = true;
-      // Try to load system info if connection is successful
       if (!systemInfo.value) {
         await loadSystemInfo();
       }
@@ -92,52 +88,17 @@ const checkApiConnection = async () => {
   }
 };
 
-const verifyPassword = async () => {
-  loading.value = true;
-  error.value = "";
-
-  try {
-    const result = await setupStore.verifyInitialPassword(
-      initialPassword.value
-    );
-
-    if (result.valid) {
-      passwordVerified.value = true;
-      apiConnected.value = true; // Mark API as connected on successful verification
-      await loadSystemInfo();
-    } else {
-      error.value = result.message || "Invalid password";
-    }
-  } catch (err) {
-    // Check if it's a network error
-    if (
-      err.message.includes("fetch") ||
-      err.message.includes("Failed to fetch")
-    ) {
-      apiConnected.value = false;
-      error.value =
-        "Cannot connect to API server. Please check if the server is running.";
-    } else {
-      error.value = "Failed to verify password. Please try again.";
-    }
-  } finally {
-    loading.value = false;
-  }
-};
-
 const loadSystemInfo = async () => {
   try {
     const info = await setupStore.getSystemInfo();
     if (info) {
       systemInfo.value = info;
 
-      // Get install command for detected OS
       const script = await setupStore.getAgentInstallScript();
       if (script) {
         agentInstallCommand.value = script;
       }
 
-      // Always start polling for agent status (regardless of OS)
       startAgentPolling();
     }
   } catch (err) {
@@ -150,16 +111,13 @@ const checkAgentStatus = async () => {
     const response = await fetch("/api/setup/agent-status");
     const data = await response.json();
 
-    // Update connection state
     const wasConnected = agentConnected.value;
     agentConnected.value = data.agent_installed;
 
-    // If just connected, fetch host info
     if (data.agent_installed && !wasConnected) {
       await getHostInfo();
     }
 
-    // If disconnected, clear host info
     if (!data.agent_installed && wasConnected) {
       hostInfo.value = null;
     }
@@ -172,7 +130,6 @@ const checkAgentStatus = async () => {
 
 const getHostInfo = async () => {
   try {
-    const config = useRuntimeConfig();
     const response = await fetch("/api/setup/agent-host-info");
     const data = await response.json();
 
@@ -187,10 +144,8 @@ const getHostInfo = async () => {
 const startAgentPolling = () => {
   if (pollingInterval) return;
 
-  // Check immediately
   checkAgentStatus();
 
-  // Then check every 2 seconds (continuous polling)
   pollingInterval = setInterval(() => {
     checkAgentStatus();
   }, 2000);
@@ -217,27 +172,13 @@ const copyInstallCommand = async () => {
   }
 };
 
-// Computed command based on detected OS
-const logsCommand = computed(() => {
-  const platform = systemInfo.value?.platform?.toLowerCase() || "";
-  const isWindows = platform.includes("win") || platform === "windows";
-
-  if (isWindows) {
-    // PowerShell command - show full log line with password (last occurrence)
-    return '(docker logs (docker ps -q -f label=localrun-app) 2>&1 | Select-String "Initial Setup Password:" | Select-Object -Last 1).Line';
-  } else {
-    // Unix/Linux/macOS - show full log line with password (last occurrence)
-    return 'docker logs $(docker ps -q -f label=localrun-app) 2>&1 | grep "Initial Setup Password:" | tail -1';
-  }
-});
-
-const copyLogsCommand = async () => {
+const copyToken = async () => {
   if (import.meta.client && navigator.clipboard) {
     try {
-      await navigator.clipboard.writeText(logsCommand.value);
-      logsCopied.value = true;
+      await navigator.clipboard.writeText(resetToken.value);
+      copied.value = true;
       setTimeout(() => {
-        logsCopied.value = false;
+        copied.value = false;
       }, 2000);
     } catch (err) {
       console.error("Failed to copy:", err);
@@ -245,57 +186,58 @@ const copyLogsCommand = async () => {
   }
 };
 
-const handleSubmit = async () => {
-  console.log("handleSubmit called");
-  console.log("canSubmit:", canSubmit.value);
+const downloadToken = () => {
+  const tokenData = {
+    reset_token: resetToken.value,
+    installation_name: formData.value.serverName,
+    created_at: new Date().toISOString(),
+    note: "Keep this token safe! You'll need it to reset your password if you forget it.",
+  };
 
-  if (!canSubmit.value) {
-    console.log("Submit blocked - canSubmit is false");
-    return;
-  }
+  const blob = new Blob([JSON.stringify(tokenData, null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `localrun-reset-token-${formData.value.serverName}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  downloadedToken.value = true;
+};
+
+const handleSubmit = async () => {
+  if (!canSubmit.value) return;
 
   loading.value = true;
   error.value = "";
-  console.log("Starting setup submission...");
 
   try {
     const setupData = {
-      initial_password: initialPassword.value,
       new_password: formData.value.newPassword,
       new_password_confirmation: formData.value.confirmPassword,
       installation_name: formData.value.serverName,
     };
 
-    console.log("Setup data:", {
-      ...setupData,
-      initial_password: "***",
-      new_password: "***",
-      new_password_confirmation: "***",
-    });
-
     const result = await setupStore.completeSetup(setupData);
-    console.log("Setup completed successfully:", result);
-
-    // Update setup status in store
-    console.log("Updating setup status...");
-    await setupStore.checkSetupStatus();
-    console.log("Setup status updated");
-
-    // Force navigation to login
-    console.log("Navigating to login...");
-    if (import.meta.client) {
-      console.log("Using window.location.href");
-      window.location.href = "/login";
-    } else {
-      console.log("Using navigateTo");
-      await navigateTo("/login", { replace: true });
-    }
+    
+    resetToken.value = result.reset_token;
+    setupCompleted.value = true;
   } catch (err) {
     console.error("Setup error:", err);
     error.value = err.message || "Setup failed. Please try again.";
   } finally {
     loading.value = false;
-    console.log("handleSubmit finished");
+  }
+};
+
+const continueToDashboard = async () => {
+  await setupStore.checkSetupStatus();
+  
+  if (import.meta.client) {
+    window.location.href = "/login";
+  } else {
+    await navigateTo("/login", { replace: true });
   }
 };
 
@@ -303,14 +245,11 @@ onMounted(async () => {
   if (import.meta.client) {
     isDark.value = document.documentElement.classList.contains("dark");
 
-    // Check if setup is already completed
     try {
       const response = await fetch("/api/setup/status");
       if (response.ok) {
         const data = await response.json();
         if (data.setup_completed) {
-          // Setup already completed, redirect to login
-          console.log("Setup already completed, redirecting to login...");
           window.location.href = "/login";
           return;
         }
@@ -319,7 +258,6 @@ onMounted(async () => {
       console.error("Error checking setup status:", err);
     }
 
-    // Check API connection
     checkApiConnection();
   }
 });
@@ -328,6 +266,7 @@ onBeforeUnmount(() => {
   stopAgentPolling();
 });
 </script>
+
 <template>
   <div
     class="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4"
@@ -403,7 +342,7 @@ onBeforeUnmount(() => {
             <button
               @click="checkApiConnection"
               :disabled="checkingConnection"
-              class="inline-flex items-center gap-1 px-2 py-1 bg-yellow-600 hover:bg-yellow-700 disabled:bg-yellow-400 text-white text-xs font-medium rounded  disabled:cursor-not-allowed"
+              class="inline-flex items-center gap-1 px-2 py-1 bg-yellow-600 hover:bg-yellow-700 disabled:bg-yellow-400 text-white text-xs font-medium rounded disabled:cursor-not-allowed"
             >
               <i
                 v-if="checkingConnection"
@@ -424,93 +363,40 @@ onBeforeUnmount(() => {
         <p class="text-sm text-red-800 dark:text-red-300">{{ error }}</p>
       </div>
 
-      <!-- Unified Form Card -->
+      <!-- Setup Form (shown before completion) -->
       <div
+        v-if="!setupCompleted"
         class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden"
       >
         <form
           @submit.prevent="handleSubmit"
           class="divide-y divide-gray-200 dark:divide-gray-700"
         >
-          <!-- Section 1: Initial Password -->
+          <!-- Section 1: Set Password -->
           <div class="p-6">
             <h2
               class="text-sm font-semibold text-gray-900 dark:text-white mb-4"
             >
-              1. Initial Password
+              1. Set Your Password
             </h2>
-            <p class="text-xs text-gray-600 dark:text-gray-400 mb-3">
-              Enter the password from your Docker logs
+            <p class="text-xs text-gray-600 dark:text-gray-400 mb-4">
+              Create a secure password for your admin account
             </p>
 
-            <!-- Docker logs command -->
-            <div class="relative group mb-4">
-              <div
-                class="bg-gray-900 dark:bg-black rounded-lg p-4 overflow-x-auto"
-              >
-                <code
-                  class="text-sm text-green-400 whitespace-pre-wrap block"
-                  >{{ logsCommand }}</code
-                >
-              </div>
-              <button
-                @click="copyLogsCommand"
-                class="absolute top-2 right-2 p-2 rounded bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white  opacity-0 group-hover:opacity-100"
-                :title="logsCopied ? 'Copied!' : 'Copy command'"
-              >
-                <i v-if="logsCopied" class="ti ti-check text-sm"></i>
-                <i v-else class="ti ti-copy text-sm"></i>
-              </button>
-            </div>
-
-            <div class="flex gap-2">
-              <input
-                v-model="initialPassword"
-                type="password"
-                required
-                :disabled="passwordVerified || !apiConnected"
-                class="flex-1 px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                placeholder="Initial password"
-              />
-              <button
-                v-if="!passwordVerified"
-                type="button"
-                @click="verifyPassword"
-                :disabled="loading || !initialPassword || !apiConnected"
-                class="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium rounded-lg transition-all disabled:cursor-not-allowed text-sm"
-              >
-                {{ loading ? "..." : "Verify" }}
-              </button>
-              <div v-else class="flex items-center px-3">
-                <i
-                  class="ti ti-check text-green-600 dark:text-green-400 text-xl"
-                ></i>
-              </div>
-            </div>
-          </div>
-
-          <!-- Section 2: New Password -->
-          <div class="p-6" :class="{ 'opacity-50': !passwordVerified }">
-            <h2
-              class="text-sm font-semibold text-gray-900 dark:text-white mb-4"
-            >
-              2. New Password
-            </h2>
-
-            <!-- Password inputs in horizontal layout -->
+            <!-- Password inputs -->
             <div class="grid grid-cols-2 gap-4 mb-4">
               <div>
                 <label
                   class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2"
-                  >New Password</label
+                  >Password</label
                 >
                 <input
                   v-model="formData.newPassword"
                   type="password"
                   required
-                  :disabled="!passwordVerified"
+                  :disabled="!apiConnected"
                   class="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm disabled:cursor-not-allowed"
-                  placeholder="Enter new password"
+                  placeholder="Enter password"
                 />
               </div>
               <div>
@@ -522,14 +408,14 @@ onBeforeUnmount(() => {
                   v-model="formData.confirmPassword"
                   type="password"
                   required
-                  :disabled="!passwordVerified"
+                  :disabled="!apiConnected"
                   class="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm disabled:cursor-not-allowed"
                   placeholder="Confirm password"
                 />
               </div>
             </div>
 
-            <!-- Security Requirements -->
+            <!-- Password Requirements -->
             <div v-if="formData.newPassword" class="space-y-2">
               <div class="flex items-center gap-4">
                 <div class="flex items-center gap-2">
@@ -579,12 +465,12 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <!-- Section 3: Server Configuration -->
-          <div class="p-6" :class="{ 'opacity-50': !passwordVerified }">
+          <!-- Section 2: Server Configuration -->
+          <div class="p-6">
             <h2
               class="text-sm font-semibold text-gray-900 dark:text-white mb-4"
             >
-              3. Server Configuration
+              2. Server Configuration
             </h2>
 
             <!-- Server Name Input -->
@@ -597,7 +483,7 @@ onBeforeUnmount(() => {
                 v-model="formData.serverName"
                 type="text"
                 required
-                :disabled="!passwordVerified"
+                :disabled="!apiConnected"
                 class="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm disabled:cursor-not-allowed"
                 placeholder="HomeServerPrincipal"
               />
@@ -631,18 +517,6 @@ onBeforeUnmount(() => {
                     <span
                       class="text-xs font-medium text-green-700 dark:text-green-300"
                       >Connected</span
-                    >
-                  </div>
-                  <div
-                    v-else-if="checkingAgent"
-                    class="flex items-center gap-1 px-2 py-1 bg-gray-100 dark:bg-gray-700 rounded-full"
-                  >
-                    <i
-                      class="ti ti-loader-2 text-gray-600 dark:text-gray-400 text-sm animate-spin"
-                    ></i>
-                    <span
-                      class="text-xs font-medium text-gray-600 dark:text-gray-400"
-                      >Checking...</span
                     >
                   </div>
                   <div
@@ -726,8 +600,8 @@ onBeforeUnmount(() => {
                 <button
                   type="button"
                   @click="copyInstallCommand"
-                  :disabled="!passwordVerified"
-                  class="absolute top-2 right-2 p-1.5 rounded bg-gray-800 hover:bg-gray-700 disabled:bg-gray-700 text-gray-400 hover:text-white disabled:text-gray-600  disabled:cursor-not-allowed opacity-0 group-hover:opacity-100"
+                  :disabled="!apiConnected"
+                  class="absolute top-2 right-2 p-1.5 rounded bg-gray-800 hover:bg-gray-700 disabled:bg-gray-700 text-gray-400 hover:text-white disabled:text-gray-600 disabled:cursor-not-allowed opacity-0 group-hover:opacity-100"
                   :title="copied ? 'Copied!' : 'Copy command'"
                 >
                   <i v-if="copied" class="ti ti-check text-sm"></i>
@@ -750,12 +624,110 @@ onBeforeUnmount(() => {
         </form>
       </div>
 
+      <!-- Setup Completed - Show Reset Token -->
+      <div
+        v-else
+        class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden"
+      >
+        <div class="p-8">
+          <!-- Success Icon -->
+          <div class="text-center mb-6">
+            <div
+              class="inline-flex items-center justify-center w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full mb-4"
+            >
+              <i
+                class="ti ti-circle-check text-4xl text-green-600 dark:text-green-400"
+              ></i>
+            </div>
+            <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+              Setup Complete!
+            </h2>
+            <p class="text-sm text-gray-600 dark:text-gray-400">
+              Your password has been configured successfully
+            </p>
+          </div>
+
+          <!-- Reset Token Warning -->
+          <div
+            class="mb-6 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg"
+          >
+            <div class="flex items-start gap-3">
+              <i
+                class="ti ti-alert-triangle text-amber-600 dark:text-amber-400 text-xl flex-shrink-0 mt-0.5"
+              ></i>
+              <div>
+                <h3
+                  class="text-sm font-semibold text-amber-800 dark:text-amber-300 mb-1"
+                >
+                  Important: Save Your Reset Token
+                </h3>
+                <p class="text-xs text-amber-700 dark:text-amber-400">
+                  This token will allow you to reset your password if you forget
+                  it. Save it securely - you won't be able to see it again!
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Reset Token Display -->
+          <div class="mb-6">
+            <label
+              class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2"
+              >Reset Token</label
+            >
+            <div class="relative">
+              <input
+                :value="resetToken"
+                type="text"
+                readonly
+                class="w-full px-4 py-3 pr-24 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white font-mono text-sm"
+              />
+              <button
+                @click="copyToken"
+                class="absolute right-2 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded transition-all"
+              >
+                <i
+                  v-if="copied"
+                  class="ti ti-check text-sm mr-1"
+                ></i>
+                <i v-else class="ti ti-copy text-sm mr-1"></i>
+                {{ copied ? "Copied!" : "Copy" }}
+              </button>
+            </div>
+          </div>
+
+          <!-- Action Buttons -->
+          <div class="flex gap-3 mb-6">
+            <button
+              @click="downloadToken"
+              class="flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-900 dark:text-white font-medium rounded-lg transition-all"
+            >
+              <i
+                v-if="downloadedToken"
+                class="ti ti-check text-lg"
+              ></i>
+              <i v-else class="ti ti-download text-lg"></i>
+              {{ downloadedToken ? "Downloaded" : "Download as JSON" }}
+            </button>
+          </div>
+
+          <!-- Continue Button -->
+          <button
+            @click="continueToDashboard"
+            class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-lg transition-all flex items-center justify-center gap-2"
+          >
+            <span>Continue to Dashboard</span>
+            <i class="ti ti-arrow-right text-lg"></i>
+          </button>
+        </div>
+      </div>
+
       <!-- Footer -->
       <div class="mt-6 flex items-center justify-center gap-4 text-sm">
         <a
           href="http://localhost:3001"
           target="_blank"
-          class="text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400  flex items-center gap-1"
+          class="text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 flex items-center gap-1"
         >
           <i class="ti ti-book text-lg"></i>
           <span>Documentation</span>
@@ -773,7 +745,7 @@ onBeforeUnmount(() => {
           <span class="text-gray-300 dark:text-gray-700">•</span>
           <button
             @click="toggleTheme"
-            class="text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400  flex items-center gap-1"
+            class="text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 flex items-center gap-1"
           >
             <i v-if="isDark" class="ti ti-sun text-lg"></i>
             <i v-else class="ti ti-moon text-lg"></i>
